@@ -3,6 +3,7 @@ package it.sculptura.jarvis;
 import android.Manifest;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -11,6 +12,7 @@ import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.service.voice.VoiceInteractionService;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -37,6 +39,9 @@ public class MainActivity extends Activity {
         Window window = getWindow();
         window.setStatusBarColor(Color.BLACK);
         window.setNavigationBarColor(Color.BLACK);
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true);
+        }
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false);
             View decor = window.getDecorView();
@@ -59,7 +64,7 @@ public class MainActivity extends Activity {
         center.addView(orb, new LinearLayout.LayoutParams(orbSize, orbSize));
 
         status = new TextView(this);
-        status.setText("TOCCA PER ATTIVARE");
+        status.setText("JARVIS PRONTO");
         status.setTextColor(Color.rgb(95, 205, 225));
         status.setTextSize(11f);
         status.setGravity(Gravity.CENTER);
@@ -96,6 +101,17 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (!isSystemAssistant()) {
+            orb.setMode(OrbView.Mode.IDLE);
+            status.setText("TOCCA PER IMPOSTARE JARVIS COME ASSISTENTE");
+        } else {
+            status.setText("JARVIS PRONTO • ASSISTENTE DI SISTEMA");
+        }
+    }
+
+    @Override
     protected void onStop() {
         try { unregisterReceiver(stateReceiver); } catch (Exception ignored) { }
         super.onStop();
@@ -110,7 +126,34 @@ public class MainActivity extends Activity {
             }
             return;
         }
+
+        if (!isSystemAssistant()) {
+            openAssistantSettings();
+            return;
+        }
+
         startJarvisService();
+    }
+
+    private boolean isSystemAssistant() {
+        try {
+            ComponentName component = new ComponentName(this, JarvisVoiceInteractionService.class);
+            return VoiceInteractionService.isActiveService(this, component);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void openAssistantSettings() {
+        status.setText("SELEZIONA JARVIS COME ASSISTENTE DIGITALE");
+        try {
+            Intent intent = new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS);
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+                return;
+            }
+        } catch (Exception ignored) { }
+        startActivity(new Intent(Settings.ACTION_SETTINGS));
     }
 
     private void startJarvisService() {
@@ -125,7 +168,8 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_PERMISSIONS && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startJarvisService();
+            if (!isSystemAssistant()) openAssistantSettings();
+            else startJarvisService();
         } else if (requestCode == REQ_PERMISSIONS) {
             status.setText("SERVE IL PERMESSO MICROFONO");
             orb.setMode(OrbView.Mode.ERROR);
@@ -156,7 +200,7 @@ public class MainActivity extends Activity {
                 break;
             default:
                 orb.setMode(OrbView.Mode.IDLE);
-                status.setText("JARVIS PRONTO");
+                status.setText(isSystemAssistant() ? "JARVIS PRONTO • ASSISTENTE DI SISTEMA" : "TOCCA PER IMPOSTARE JARVIS COME ASSISTENTE");
         }
     }
 
