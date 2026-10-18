@@ -1,6 +1,7 @@
 package it.sculptura.jarvis;
 
 import android.content.Context;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
@@ -26,10 +27,16 @@ public class JarvisTtsManager implements TextToSpeech.OnInitListener {
     @Override
     public void onInit(int status) {
         if (status != TextToSpeech.SUCCESS) return;
+
         tts.setLanguage(Locale.ITALY);
-        tts.setPitch(0.72f);
-        tts.setSpeechRate(0.92f);
-        selectBestItalianLocalVoice();
+
+        // A pitch troppo basso rende molte voci Android metalliche e poco naturali.
+        // Manteniamo invece un timbro appena piu profondo del neutro.
+        tts.setPitch(0.96f);
+        tts.setSpeechRate(1.02f);
+
+        selectBestItalianVoice();
+
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override public void onStart(String utteranceId) { }
             @Override public void onError(String utteranceId) { finish(); }
@@ -38,27 +45,57 @@ public class JarvisTtsManager implements TextToSpeech.OnInitListener {
         ready = true;
     }
 
-    private void selectBestItalianLocalVoice() {
+    private void selectBestItalianVoice() {
         try {
             Set<Voice> voices = tts.getVoices();
-            if (voices == null) return;
+            if (voices == null || voices.isEmpty()) return;
+
             Voice best = null;
             int bestScore = Integer.MIN_VALUE;
+
             for (Voice voice : voices) {
                 Locale locale = voice.getLocale();
                 if (locale == null || !"it".equalsIgnoreCase(locale.getLanguage())) continue;
+
                 int score = 0;
-                if (!voice.isNetworkConnectionRequired()) score += 20;
-                if (Locale.ITALY.getCountry().equalsIgnoreCase(locale.getCountry())) score += 10;
-                String n = voice.getName() == null ? "" : voice.getName().toLowerCase(Locale.ROOT);
-                if (n.contains("male") || n.contains("masch") || n.contains("uomo")) score += 50;
-                if (n.contains("_m") || n.contains("-m")) score += 8;
+
+                // La qualita dichiarata dal motore conta piu di tutto.
+                score += voice.getQuality() * 4;
+                score -= voice.getLatency();
+
+                if (Locale.ITALY.getCountry().equalsIgnoreCase(locale.getCountry())) {
+                    score += 200;
+                }
+
+                // Le voci di rete sono spesso le versioni neural/natural del motore TTS.
+                if (voice.isNetworkConnectionRequired()) {
+                    score += 250;
+                }
+
+                String name = voice.getName() == null
+                        ? ""
+                        : voice.getName().toLowerCase(Locale.ROOT);
+
+                if (name.contains("neural") || name.contains("natural") ||
+                        name.contains("wavenet") || name.contains("network")) {
+                    score += 400;
+                }
+
+                // Preferenza leggera per una voce maschile, senza sacrificare la qualita.
+                if (name.contains("male") || name.contains("masch") ||
+                        name.contains("uomo") || name.contains("_m") || name.contains("-m")) {
+                    score += 25;
+                }
+
                 if (score > bestScore) {
                     bestScore = score;
                     best = voice;
                 }
             }
-            if (best != null) tts.setVoice(best);
+
+            if (best != null) {
+                tts.setVoice(best);
+            }
         } catch (Exception ignored) { }
     }
 
@@ -71,13 +108,25 @@ public class JarvisTtsManager implements TextToSpeech.OnInitListener {
             if (onDone != null) onDone.run();
             return;
         }
+
         pendingDone = onDone;
+
         if (!ready) {
-            main.postDelayed(() -> speak(text, onDone), 400);
+            main.postDelayed(() -> speak(text, onDone), 250);
             return;
         }
+
         String id = "jarvis-" + UUID.randomUUID();
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id);
+        Bundle params = new Bundle();
+        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
+        tts.speak(cleanForSpeech(text), TextToSpeech.QUEUE_FLUSH, params, id);
+    }
+
+    private String cleanForSpeech(String text) {
+        return text
+                .replace("…", "...")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private void finish() {
