@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">JARVIS SCULPTURA</string>
-    <string name="accessibility_desc">Consente a JARVIS di interagire con le app solo quando l'utente lo richiede.</string>
+    <string name="accessibility_desc">Consente a JARVIS di interagire con le app solo quando l\'utente lo richiede.</string>
 </resources>
