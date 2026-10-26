@@ -51,7 +51,7 @@ public class VoiceWakeService extends Service {
         }
         startForeground(NOTIFICATION_ID, buildNotification());
         shuttingDown = false;
-        main.postDelayed(this::startWakeListening, 500);
+        main.postDelayed(this::startWakeListening, 450);
         return START_STICKY;
     }
 
@@ -76,7 +76,7 @@ public class VoiceWakeService extends Service {
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("JARVIS SCULPTURA")
-                .setContentText("In ascolto: Jarvis o Ferrovecchio")
+                .setContentText("In ascolto: Jarvis, Ferrovecchio o Celebro")
                 .setOngoing(true)
                 .setContentIntent(pi)
                 .build();
@@ -109,7 +109,6 @@ public class VoiceWakeService extends Service {
             @Override public void onReadyForSpeech(Bundle params) {
                 sendState(commandMode ? "command" : "listening");
             }
-
             @Override public void onBeginningOfSpeech() { }
             @Override public void onRmsChanged(float rmsdB) { }
             @Override public void onBufferReceived(byte[] buffer) { }
@@ -118,12 +117,8 @@ public class VoiceWakeService extends Service {
             @Override public void onError(int error) {
                 recognitionRunning = false;
                 if (shuttingDown) return;
-                long delay = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1100L : 450L;
-                if (commandMode) {
-                    main.postDelayed(VoiceWakeService.this::startCommandListening, delay);
-                } else {
-                    main.postDelayed(VoiceWakeService.this::startWakeListening, delay);
-                }
+                long delay = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1000L : 420L;
+                main.postDelayed(commandMode ? VoiceWakeService.this::startCommandListening : VoiceWakeService.this::startWakeListening, delay);
             }
 
             @Override public void onResults(Bundle results) {
@@ -131,7 +126,7 @@ public class VoiceWakeService extends Service {
                 ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String heard = (list == null || list.isEmpty()) ? "" : list.get(0).trim();
                 if (commandMode) {
-                    if (heard.isEmpty()) speakThenWake("Non ho capito.");
+                    if (heard.isEmpty()) speakThenWake("Ripeti pure.");
                     else processCommand(heard);
                 } else {
                     handleWakeResult(heard);
@@ -178,7 +173,7 @@ public class VoiceWakeService extends Service {
         } catch (Exception e) {
             recognitionRunning = false;
             sendState("error");
-            main.postDelayed(commandMode ? this::startCommandListening : this::startWakeListening, 900);
+            main.postDelayed(commandMode ? this::startCommandListening : this::startWakeListening, 850);
         }
     }
 
@@ -191,7 +186,7 @@ public class VoiceWakeService extends Service {
     private void handleWakeResult(String heardRaw) {
         String heard = normalize(heardRaw);
         if (!containsWakeWord(heard)) {
-            main.postDelayed(this::startWakeListening, 250);
+            main.postDelayed(this::startWakeListening, 220);
             return;
         }
         String inlineCommand = stripWakeWord(heard);
@@ -207,77 +202,44 @@ public class VoiceWakeService extends Service {
         cancelRecognition();
         commandMode = true;
         sendState("speaking");
-        tts.speak("Dimmi.", () -> main.postDelayed(this::startCommandListening, 180));
+        tts.speak("Dimmi.", () -> main.postDelayed(this::startCommandListening, 130));
     }
 
     private void processCommand(String rawCommand) {
         cancelRecognition();
-        sendState("thinking");
         String command = normalize(rawCommand);
-        String response;
-
-        if (command.startsWith("apri ")) {
-            response = AppController.openAppByLabel(this, command.substring(5).trim());
-        } else if (command.startsWith("avvia ")) {
-            response = AppController.openAppByLabel(this, command.substring(6).trim());
-        } else if (command.startsWith("cerca in rete ")) {
-            response = AppController.webSearch(this, command.substring(14).trim());
-        } else if (command.startsWith("cerca su internet ")) {
-            response = AppController.webSearch(this, command.substring(17).trim());
-        } else if (command.startsWith("cerca online ")) {
-            response = AppController.webSearch(this, command.substring(13).trim());
-        } else if (command.equals("indietro") || command.equals("torna indietro")) {
-            response = JarvisAccessibilityService.globalBack() ? "Fatto." : accessibilityNeeded();
-        } else if (command.equals("home") || command.equals("vai alla home")) {
-            response = JarvisAccessibilityService.globalHome() ? "Fatto." : accessibilityNeeded();
-        } else if (command.equals("app recenti") || command.equals("recenti")) {
-            response = JarvisAccessibilityService.globalRecents() ? "Apro le applicazioni recenti." : accessibilityNeeded();
-        } else if (command.equals("notifiche") || command.equals("apri notifiche")) {
-            response = JarvisAccessibilityService.globalNotifications() ? "Apro le notifiche." : accessibilityNeeded();
-        } else if (command.startsWith("tocca ")) {
-            String target = rawCommand.trim().substring(Math.min(rawCommand.trim().length(), 6)).trim();
-            response = JarvisAccessibilityService.clickText(target) ? "Fatto." : "Non trovo il comando " + target + " sullo schermo.";
-        } else if (command.startsWith("premi ")) {
-            String target = rawCommand.trim().substring(Math.min(rawCommand.trim().length(), 6)).trim();
-            response = JarvisAccessibilityService.clickText(target) ? "Fatto." : "Non trovo il comando " + target + " sullo schermo.";
-        } else if (command.startsWith("scrivi ")) {
-            String text = rawCommand.trim().substring(Math.min(rawCommand.trim().length(), 7)).trim();
-            response = JarvisAccessibilityService.writeText(text) ? "Fatto." : "Non trovo un campo di testo attivo.";
-        } else if (command.contains("accessibilita") || command.contains("permessi avanzati")) {
-            AppController.openAccessibilitySettings(this);
-            response = "Apri JARVIS Accessibilità e attivalo.";
-        } else if (command.equals("smetti di ascoltare") || command.equals("disattivati") || command.equals("stop jarvis")) {
+        if (command.equals("smetti di ascoltare") || command.equals("disattivati") || command.equals("stop jarvis")) {
             sendState("speaking");
             tts.speak("Ricevuto. Mi disattivo.", this::shutdownJarvis);
             return;
-        } else if (command.equals("chi sei") || command.equals("presentati")) {
-            response = "Sono JARVIS SCULPTURA. Posso aprire applicazioni, cercare in rete e aiutarti a controllare Android con i permessi che mi concedi.";
-        } else {
-            response = "Questo comando non è ancora disponibile. Posso aprire applicazioni, cercare in rete, premere elementi sullo schermo, scrivere testo, andare indietro, alla home o nelle notifiche.";
         }
 
+        sendState("thinking");
+        String response;
+        try {
+            response = JarvisBrain.handle(this, rawCommand);
+        } catch (Exception e) {
+            response = AppController.webSearch(this, rawCommand);
+        }
         speakThenWake(response);
-    }
-
-    private String accessibilityNeeded() {
-        return "Per farlo devi attivare JARVIS Accessibilità. Tieni premuto il cerchio per aprire le impostazioni.";
     }
 
     private void speakThenWake(String response) {
         commandMode = false;
         sendState("speaking");
-        tts.speak(response, () -> main.postDelayed(this::startWakeListening, 220));
+        tts.speak(response, () -> main.postDelayed(this::startWakeListening, 160));
     }
 
     private boolean containsWakeWord(String text) {
         String n = normalize(text);
-        return n.matches(".*\\bjarvis\\b.*") || n.matches(".*\\bferrovecchio\\b.*");
+        return n.matches(".*\\bjarvis\\b.*") || n.matches(".*\\bferrovecchio\\b.*") || n.matches(".*\\bcelebro\\b.*");
     }
 
     private String stripWakeWord(String text) {
         String n = normalize(text);
         n = n.replaceFirst("\\bjarvis\\b", "");
         n = n.replaceFirst("\\bferrovecchio\\b", "");
+        n = n.replaceFirst("\\bcelebro\\b", "");
         return n.replaceAll("^[,;:.!?\\s]+", "").trim();
     }
 
@@ -321,8 +283,5 @@ public class VoiceWakeService extends Service {
         super.onDestroy();
     }
 
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
+    @Override public IBinder onBind(Intent intent) { return null; }
 }

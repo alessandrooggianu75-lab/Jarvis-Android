@@ -39,9 +39,7 @@ public class MainActivity extends Activity {
         Window window = getWindow();
         window.setStatusBarColor(Color.BLACK);
         window.setNavigationBarColor(Color.BLACK);
-        if (Build.VERSION.SDK_INT >= 27) {
-            setShowWhenLocked(true);
-        }
+        if (Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true);
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false);
             View decor = window.getDecorView();
@@ -93,11 +91,8 @@ public class MainActivity extends Activity {
     protected void onStart() {
         super.onStart();
         IntentFilter filter = new IntentFilter(VoiceWakeService.ACTION_STATE);
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(stateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(stateReceiver, filter);
-        }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(stateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(stateReceiver, filter);
     }
 
     @Override
@@ -126,12 +121,10 @@ public class MainActivity extends Activity {
             }
             return;
         }
-
         if (!isSystemAssistant()) {
             openAssistantSettings();
             return;
         }
-
         startJarvisService();
     }
 
@@ -180,7 +173,7 @@ public class MainActivity extends Activity {
         switch (state) {
             case "listening":
                 orb.setMode(OrbView.Mode.LISTENING);
-                status.setText("IN ASCOLTO • JARVIS / FERROVECCHIO");
+                status.setText("IN ASCOLTO • JARVIS / FERROVECCHIO / CELEBRO");
                 break;
             case "command":
                 orb.setMode(OrbView.Mode.LISTENING);
