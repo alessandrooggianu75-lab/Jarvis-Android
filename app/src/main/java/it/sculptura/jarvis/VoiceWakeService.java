@@ -6,7 +6,6 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -87,23 +86,21 @@ public class VoiceWakeService extends Service {
             sendState("error");
             return;
         }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
-                recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
-            } else {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-            }
-        } catch (Exception e) {
-            recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        }
+
+        // Usa il riconoscitore Android predefinito: sui Samsung/Google recenti
+        // è normalmente più accurato del motore offline forzato.
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
 
         recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.ITALY.toLanguageTag());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.ITALY.toLanguageTag());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1100L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 700L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L);
 
         recognizer.setRecognitionListener(new RecognitionListener() {
             @Override public void onReadyForSpeech(Bundle params) {
@@ -117,41 +114,65 @@ public class VoiceWakeService extends Service {
             @Override public void onError(int error) {
                 recognitionRunning = false;
                 if (shuttingDown) return;
-                long delay = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1000L : 420L;
+                long delay = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1000L : 500L;
                 main.postDelayed(commandMode ? VoiceWakeService.this::startCommandListening : VoiceWakeService.this::startWakeListening, delay);
             }
 
             @Override public void onResults(Bundle results) {
                 recognitionRunning = false;
                 ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                String heard = (list == null || list.isEmpty()) ? "" : list.get(0).trim();
+                String heard = bestResult(list);
+
                 if (commandMode) {
-                    if (heard.isEmpty()) speakThenWake("Ripeti pure.");
-                    else processCommand(heard);
+                    if (heard.isEmpty()) {
+                        speakThenWake("Ripeti pure.");
+                        return;
+                    }
+                    String normalized = normalize(heard);
+                    if (containsWakeWord(normalized)) {
+                        String stripped = stripWakeWord(normalized);
+                        processCommand(stripped.isEmpty() ? heard : stripped);
+                    } else {
+                        processCommand(heard);
+                    }
                 } else {
                     handleWakeResult(heard);
                 }
             }
 
             @Override public void onPartialResults(Bundle partialResults) {
-                if (commandMode) return;
                 ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 if (list == null || list.isEmpty()) return;
+
                 String heard = normalize(list.get(0));
-                if (containsWakeWord(heard)) {
-                    cancelRecognition();
+
+                // Importante: non interrompere l'ascolto appena compare solo la wake word.
+                // Aspettiamo che l'utente completi "Jarvis, apri Chrome".
+                if (!commandMode && containsWakeWord(heard)) {
                     String inlineCommand = stripWakeWord(heard);
-                    if (!inlineCommand.isEmpty()) {
+                    if (inlineCommand.length() >= 2) {
+                        cancelRecognition();
                         commandMode = true;
                         processCommand(inlineCommand);
-                    } else {
-                        wakeAndAsk();
                     }
                 }
             }
 
             @Override public void onEvent(int eventType, Bundle params) { }
         });
+    }
+
+    private String bestResult(ArrayList<String> list) {
+        if (list == null || list.isEmpty()) return "";
+        for (String candidate : list) {
+            if (candidate != null && containsWakeWord(candidate) && !stripWakeWord(candidate).isEmpty()) {
+                return candidate.trim();
+            }
+        }
+        for (String candidate : list) {
+            if (candidate != null && !candidate.trim().isEmpty()) return candidate.trim();
+        }
+        return "";
     }
 
     private void startWakeListening() {
@@ -186,7 +207,7 @@ public class VoiceWakeService extends Service {
     private void handleWakeResult(String heardRaw) {
         String heard = normalize(heardRaw);
         if (!containsWakeWord(heard)) {
-            main.postDelayed(this::startWakeListening, 220);
+            main.postDelayed(this::startWakeListening, 260);
             return;
         }
         String inlineCommand = stripWakeWord(heard);
@@ -202,12 +223,16 @@ public class VoiceWakeService extends Service {
         cancelRecognition();
         commandMode = true;
         sendState("speaking");
-        tts.speak("Dimmi.", () -> main.postDelayed(this::startCommandListening, 130));
+        tts.speak("Dimmi.", () -> main.postDelayed(this::startCommandListening, 180));
     }
 
     private void processCommand(String rawCommand) {
         cancelRecognition();
         String command = normalize(rawCommand);
+        if (command.isEmpty()) {
+            speakThenWake("Ripeti pure.");
+            return;
+        }
         if (command.equals("smetti di ascoltare") || command.equals("disattivati") || command.equals("stop jarvis")) {
             sendState("speaking");
             tts.speak("Ricevuto. Mi disattivo.", this::shutdownJarvis);
@@ -227,7 +252,7 @@ public class VoiceWakeService extends Service {
     private void speakThenWake(String response) {
         commandMode = false;
         sendState("speaking");
-        tts.speak(response, () -> main.postDelayed(this::startWakeListening, 160));
+        tts.speak(response, () -> main.postDelayed(this::startWakeListening, 220));
     }
 
     private boolean containsWakeWord(String text) {
